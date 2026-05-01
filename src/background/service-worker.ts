@@ -6,6 +6,7 @@ import { TabSnapshot, VolumeApplyResult, VolumeState } from "../shared/types";
 const TAB_GAINS_STORAGE_KEY = "volumeTabGains";
 const TAB_GAIN_PERSIST_DEBOUNCE_MS = 2_000;
 const TAB_GAIN_QUOTA_RETRY_MS = 60_000;
+const BETTER_FIND_SHORTCUT_EVENT = "utility-belt:better-find-shortcut";
 
 type TabGainStore = Record<string, number>;
 
@@ -206,6 +207,132 @@ function canInjectIntoTab(tab: chrome.tabs.Tab): boolean {
   return Boolean(tab.url && /^https?:\/\//.test(tab.url));
 }
 
+function getBetterFindScriptFile(): string | undefined {
+  for (const script of chrome.runtime.getManifest().content_scripts ?? []) {
+    const file = script.js?.find((scriptFile) => scriptFile.includes("better-find"));
+
+    if (file) {
+      return file;
+    }
+  }
+
+  return undefined;
+}
+
+async function ensureBetterFindInTab(tabId: number): Promise<{ ok: true; injected: boolean }> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const file = getBetterFindScriptFile();
+    const settings = await getSettings();
+
+    if (!file || !canInjectIntoTab(tab)) {
+      return { ok: true, injected: false };
+    }
+
+    await chrome.scripting.executeScript({
+      files: [file],
+      target: { allFrames: true, tabId },
+    });
+
+    return { ok: true, injected: await installBetterFindShortcutBridge(tabId, settings.find.enabled) };
+  } catch {
+    return { ok: true, injected: false };
+  }
+}
+
+function installBetterFindShortcutBridgeInPage(enabled: boolean, shortcutEvent: string): boolean {
+  const utilityBeltWindow = window as typeof window & {
+    __utilityBeltBetterFindBridgeInstalled?: boolean;
+    __utilityBeltBetterFindEnabled?: boolean;
+  };
+
+  function isEditableTarget(target: EventTarget | null): boolean {
+    return (
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement)
+    );
+  }
+
+  utilityBeltWindow.__utilityBeltBetterFindEnabled = enabled;
+
+  if (utilityBeltWindow.__utilityBeltBetterFindBridgeInstalled) {
+    return true;
+  }
+
+  utilityBeltWindow.__utilityBeltBetterFindBridgeInstalled = true;
+
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      const wantsFind =
+        utilityBeltWindow.__utilityBeltBetterFindEnabled &&
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.key.toLocaleLowerCase() === "f";
+
+      if (!wantsFind) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      window.dispatchEvent(
+        new CustomEvent(shortcutEvent, {
+          detail: {
+            editable: isEditableTarget(event.target),
+            selectedText: window.getSelection()?.toString().trim() ?? "",
+          },
+        }),
+      );
+    },
+    true,
+  );
+
+  return true;
+}
+
+async function installBetterFindShortcutBridge(tabId: number, enabled: boolean): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+
+    if (!canInjectIntoTab(tab)) {
+      return false;
+    }
+
+    await chrome.scripting.executeScript({
+      args: [enabled, BETTER_FIND_SHORTCUT_EVENT],
+      func: installBetterFindShortcutBridgeInPage,
+      target: { allFrames: true, tabId },
+      world: "MAIN",
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function broadcastBetterFindShortcutBridge(enabled: boolean): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (tab.id !== undefined) {
+        await installBetterFindShortcutBridge(tab.id, enabled);
+      }
+    }),
+  );
+}
+
+async function syncBetterFindShortcutBridge(tabId: number): Promise<void> {
+  const settings = await getSettings();
+  await installBetterFindShortcutBridge(tabId, settings.find.enabled);
+}
+
 async function getVolumeStateForTab(tabId?: number): Promise<VolumeState> {
   const settings = await getSettings();
 
@@ -297,10 +424,16 @@ async function broadcastVolumeState(): Promise<void> {
 
 async function handleMessage(message: RuntimeMessage, sender: chrome.runtime.MessageSender) {
   switch (message.type) {
+    case "find:ensure-tab":
+      return ensureBetterFindInTab(message.tabId);
     case "settings:get":
       return getSettings();
     case "settings:update": {
       const nextSettings = await updateSettings(message.patch);
+
+      if (message.patch.find?.enabled !== undefined) {
+        await broadcastBetterFindShortcutBridge(nextSettings.find.enabled);
+      }
 
       if (message.patch.volume) {
         await broadcastVolumeState();
@@ -351,6 +484,16 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void clearTabGain(tabId).then(() => flushTabGainStore());
+});
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void syncBetterFindShortcutBridge(tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading" || changeInfo.status === "complete") {
+    void syncBetterFindShortcutBridge(tabId);
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

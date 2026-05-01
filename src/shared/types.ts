@@ -2,7 +2,12 @@ export interface FindSettings {
   matchColor: string;
   activeColor: string;
   rippleColor: string;
+  endlessRipple: boolean;
   enabled: boolean;
+  highlightPaddingX: number;
+  highlightPaddingY: number;
+  highlightRadius: number;
+  rippleSize: number;
 }
 
 export interface VolumeSettings {
@@ -44,10 +49,15 @@ export type StoredSettings = Settings | SettingsPatch;
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   find: {
-    matchColor: "#FFEB3B",
-    activeColor: "#FF6F00",
-    rippleColor: "#FF6F00",
+    matchColor: "#99F6E4",
+    activeColor: "#14B8A6",
+    rippleColor: "#5EEAD4",
+    endlessRipple: false,
     enabled: true,
+    highlightPaddingX: 0.24,
+    highlightPaddingY: 0.04,
+    highlightRadius: 999,
+    rippleSize: 10,
   },
   volume: {
     enabled: true,

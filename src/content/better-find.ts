@@ -5,14 +5,34 @@ const BAR_ID = "utility-belt-find";
 const STYLE_ID = "utility-belt-find-styles";
 const MARK_CLASS = "utility-belt-find-mark";
 const ACTIVE_CLASS = "utility-belt-find-active";
+const ACTIVE_OVERLAY_CLASS = "utility-belt-find-active-overlay";
+const ACTIVE_OVERLAY_ID = "utility-belt-find-active-overlay-root";
+const SHORTCUT_EVENT = "utility-belt:better-find-shortcut";
 
 let settings: FindSettings = DEFAULT_SETTINGS.find;
 let bar: HTMLDivElement | null = null;
 let input: HTMLInputElement | null = null;
 let countLabel: HTMLSpanElement | null = null;
+let activeOverlayRoot: HTMLDivElement | null = null;
 let matches: HTMLElement[] = [];
 let activeIndex = -1;
 let lastQuery = "";
+let activeOverlayFrame = 0;
+
+function getReadableTextColor(backgroundColor: string): string {
+  const normalized = backgroundColor.trim().replace("#", "");
+
+  if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) {
+    return "#061512";
+  }
+
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+
+  return luminance > 0.52 ? "#061512" : "#F4FBFA";
+}
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -29,6 +49,9 @@ function isEditable(target: EventTarget | null): boolean {
 
 function ensureStyles(): void {
   let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+  const matchTextColor = getReadableTextColor(settings.matchColor);
+  const activeTextColor = getReadableTextColor(settings.activeColor);
+  const rippleIterationCount = settings.endlessRipple ? "infinite" : "1";
 
   if (!style) {
     style = document.createElement("style");
@@ -100,22 +123,45 @@ function ensureStyles(): void {
       text-align: right;
     }
 
+    #${ACTIVE_OVERLAY_ID} {
+      inset: 0;
+      pointer-events: none;
+      position: fixed;
+      z-index: 2147483646;
+    }
+
+    .${ACTIVE_OVERLAY_CLASS} {
+      animation: utility-belt-ripple 900ms ease-out ${rippleIterationCount};
+      border-radius: ${settings.highlightRadius}px;
+      box-shadow: 0 0 0 2px ${settings.rippleColor};
+      box-sizing: border-box;
+      position: fixed;
+    }
+
     .${MARK_CLASS} {
       background: ${settings.matchColor};
-      color: inherit;
+      border-radius: ${settings.highlightRadius}px;
+      box-decoration-break: clone;
+      box-shadow: 0 0 0 ${settings.highlightPaddingX}em ${settings.matchColor};
+      color: ${matchTextColor};
+      position: relative;
       scroll-margin-block: 96px;
+      text-decoration: none;
+      z-index: 2147483645;
+      -webkit-box-decoration-break: clone;
     }
 
     .${ACTIVE_CLASS} {
-      animation: utility-belt-ripple 720ms ease-out;
       background: ${settings.activeColor};
-      outline: 2px solid ${settings.rippleColor};
-      outline-offset: 2px;
+      border-radius: ${settings.highlightRadius}px;
+      box-shadow: 0 0 0 ${settings.highlightPaddingX}em ${settings.activeColor};
+      color: ${activeTextColor};
+      outline: none;
     }
 
     @keyframes utility-belt-ripple {
-      0% { box-shadow: 0 0 0 0 ${settings.rippleColor}80; }
-      100% { box-shadow: 0 0 0 14px ${settings.rippleColor}00; }
+      0% { box-shadow: 0 0 0 2px ${settings.rippleColor}; }
+      100% { box-shadow: 0 0 0 ${settings.rippleSize}px ${settings.rippleColor}00; }
     }
   `;
 }
@@ -172,7 +218,62 @@ function ensureBar(): HTMLDivElement {
   return bar;
 }
 
+function ensureActiveOverlayRoot(): HTMLDivElement {
+  if (activeOverlayRoot) {
+    return activeOverlayRoot;
+  }
+
+  activeOverlayRoot = document.createElement("div");
+  activeOverlayRoot.id = ACTIVE_OVERLAY_ID;
+  document.documentElement.append(activeOverlayRoot);
+  return activeOverlayRoot;
+}
+
+function clearActiveOverlay(): void {
+  activeOverlayRoot?.replaceChildren();
+}
+
+function renderActiveOverlay(): void {
+  clearActiveOverlay();
+
+  if (activeIndex < 0) {
+    return;
+  }
+
+  const active = matches[activeIndex];
+
+  if (!active?.isConnected) {
+    return;
+  }
+
+  const root = ensureActiveOverlayRoot();
+  const rects = Array.from(active.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+
+  for (const rect of rects) {
+    const overlay = document.createElement("div");
+    overlay.className = ACTIVE_OVERLAY_CLASS;
+    overlay.style.height = `${rect.height}px`;
+    overlay.style.left = `${rect.left}px`;
+    overlay.style.top = `${rect.top}px`;
+    overlay.style.width = `${rect.width}px`;
+    root.append(overlay);
+  }
+}
+
+function scheduleActiveOverlayRender(): void {
+  if (activeOverlayFrame) {
+    return;
+  }
+
+  activeOverlayFrame = window.requestAnimationFrame(() => {
+    activeOverlayFrame = 0;
+    renderActiveOverlay();
+  });
+}
+
 function unwrapExistingMatches(): void {
+  clearActiveOverlay();
+
   for (const mark of matches) {
     const parent = mark.parentNode;
     if (!parent) {
@@ -198,15 +299,66 @@ function shouldSkipNode(node: Node): boolean {
   }
 
   return Boolean(
-    parent.closest(`#${BAR_ID}, script, style, textarea, input, select, [contenteditable="true"]`) ||
+    parent.closest(
+      `#${BAR_ID}, #${ACTIVE_OVERLAY_ID}, [aria-hidden="true"], [hidden], script, style, textarea, input, select, [contenteditable="true"]`,
+    ) ||
       parent.classList.contains(MARK_CLASS),
   );
+}
+
+function isRectClippedByAncestors(rect: DOMRect, startEl: HTMLElement): boolean {
+  let el: HTMLElement | null = startEl;
+
+  while (el && el !== document.documentElement) {
+    const style = window.getComputedStyle(el);
+    const ox = style.overflowX;
+    const oy = style.overflowY;
+    const clipsX = ox === "hidden" || ox === "clip" || ox === "scroll" || ox === "auto";
+    const clipsY = oy === "hidden" || oy === "clip" || oy === "scroll" || oy === "auto";
+
+    if (clipsX || clipsY) {
+      const elRect = el.getBoundingClientRect();
+      if (clipsY && (rect.bottom <= elRect.top || rect.top >= elRect.bottom)) {
+        return true;
+      }
+      if (clipsX && (rect.right <= elRect.left || rect.left >= elRect.right)) {
+        return true;
+      }
+    }
+
+    el = el.parentElement;
+  }
+
+  return false;
+}
+
+function hasVisibleTextRect(node: Text): boolean {
+  const parent = node.parentElement;
+
+  if (!parent) {
+    return false;
+  }
+
+  if (!parent.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+    return false;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(node);
+
+  try {
+    return Array.from(range.getClientRects()).some(
+      (rect) => rect.width > 0 && rect.height > 0 && !isRectClippedByAncestors(rect, parent),
+    );
+  } finally {
+    range.detach();
+  }
 }
 
 function collectTextNodes(root: HTMLElement): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
-      if (shouldSkipNode(node) || !node.textContent?.trim()) {
+      if (shouldSkipNode(node) || !node.textContent?.trim() || !hasVisibleTextRect(node as Text)) {
         return NodeFilter.FILTER_REJECT;
       }
 
@@ -280,6 +432,9 @@ function updateActive(): void {
     const active = matches[activeIndex];
     active.classList.add(ACTIVE_CLASS);
     active.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    scheduleActiveOverlayRender();
+  } else {
+    clearActiveOverlay();
   }
 
   updateCount();
@@ -324,36 +479,61 @@ function hideBar(): void {
   unwrapExistingMatches();
 }
 
-document.addEventListener(
-  "keydown",
-  (event) => {
-    const wantsFind = (event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f";
+function handleFindShortcut(event: KeyboardEvent): void {
+  const wantsFind = (event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f";
 
-    if (!wantsFind || !settings.enabled) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const selectedText = window.getSelection()?.toString().trim();
-    showBar(isEditable(event.target) ? "" : selectedText ?? "");
-  },
-  true,
-);
-
-onSettingsChange((nextSettings) => {
-  settings = nextSettings.find;
-  ensureStyles();
-
-  if (lastQuery) {
-    runSearch(lastQuery);
+  if (!wantsFind || !settings.enabled) {
+    return;
   }
-});
 
-void chrome.runtime
-  .sendMessage({ type: "settings:get" })
-  .then((nextSettings) => {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const selectedText = window.getSelection()?.toString().trim();
+  showBar(isEditable(event.target) ? "" : selectedText ?? "");
+}
+
+function handleFindShortcutEvent(event: Event): void {
+  if (!settings.enabled) {
+    return;
+  }
+
+  const detail = event instanceof CustomEvent && typeof event.detail === "object" ? event.detail : undefined;
+  const editable = Boolean(detail && "editable" in detail && detail.editable);
+  const selectedText =
+    detail && "selectedText" in detail && typeof detail.selectedText === "string" ? detail.selectedText : "";
+
+  showBar(editable ? "" : selectedText);
+}
+
+const betterFindGlobal = globalThis as typeof globalThis & {
+  __utilityBeltBetterFindInstalled?: boolean;
+};
+
+if (!betterFindGlobal.__utilityBeltBetterFindInstalled) {
+  betterFindGlobal.__utilityBeltBetterFindInstalled = true;
+
+  window.addEventListener("keydown", handleFindShortcut, true);
+  window.addEventListener(SHORTCUT_EVENT, handleFindShortcutEvent);
+
+  onSettingsChange((nextSettings) => {
     settings = nextSettings.find;
     ensureStyles();
-  })
-  .catch(ensureStyles);
+
+    if (lastQuery) {
+      runSearch(lastQuery);
+    } else {
+      renderActiveOverlay();
+    }
+  });
+
+  window.addEventListener("resize", scheduleActiveOverlayRender);
+  window.addEventListener("scroll", scheduleActiveOverlayRender, true);
+
+  void chrome.runtime
+    .sendMessage({ type: "settings:get" })
+    .then((nextSettings) => {
+      settings = nextSettings.find;
+      ensureStyles();
+    })
+    .catch(ensureStyles);
+}

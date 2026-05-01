@@ -4,6 +4,20 @@ type LegacyFindSettings = Partial<Settings["find"]> & {
   replaceNativeFind?: boolean;
 };
 
+const LEGACY_FIND_DEFAULTS = {
+  matchColor: "#FFEB3B",
+  activeColor: "#FF6F00",
+  rippleColor: "#FF6F00",
+};
+
+function migrateLegacyDefaultColor(
+  color: string | undefined,
+  legacyDefault: string,
+  nextDefault: string,
+): string {
+  return !color || color.toUpperCase() === legacyDefault ? nextDefault : color;
+}
+
 function mergeSettings(settings?: StoredSettings): Settings {
   const findSettings = settings?.find as LegacyFindSettings | undefined;
 
@@ -11,10 +25,27 @@ function mergeSettings(settings?: StoredSettings): Settings {
     ...DEFAULT_SETTINGS,
     ...settings,
     find: {
-      matchColor: findSettings?.matchColor ?? DEFAULT_SETTINGS.find.matchColor,
-      activeColor: findSettings?.activeColor ?? DEFAULT_SETTINGS.find.activeColor,
-      rippleColor: findSettings?.rippleColor ?? DEFAULT_SETTINGS.find.rippleColor,
+      matchColor: migrateLegacyDefaultColor(
+        findSettings?.matchColor,
+        LEGACY_FIND_DEFAULTS.matchColor,
+        DEFAULT_SETTINGS.find.matchColor,
+      ),
+      activeColor: migrateLegacyDefaultColor(
+        findSettings?.activeColor,
+        LEGACY_FIND_DEFAULTS.activeColor,
+        DEFAULT_SETTINGS.find.activeColor,
+      ),
+      rippleColor: migrateLegacyDefaultColor(
+        findSettings?.rippleColor,
+        LEGACY_FIND_DEFAULTS.rippleColor,
+        DEFAULT_SETTINGS.find.rippleColor,
+      ),
+      endlessRipple: findSettings?.endlessRipple ?? DEFAULT_SETTINGS.find.endlessRipple,
       enabled: findSettings?.enabled ?? findSettings?.replaceNativeFind ?? DEFAULT_SETTINGS.find.enabled,
+      highlightPaddingX: findSettings?.highlightPaddingX ?? DEFAULT_SETTINGS.find.highlightPaddingX,
+      highlightPaddingY: findSettings?.highlightPaddingY ?? DEFAULT_SETTINGS.find.highlightPaddingY,
+      highlightRadius: findSettings?.highlightRadius ?? DEFAULT_SETTINGS.find.highlightRadius,
+      rippleSize: findSettings?.rippleSize ?? DEFAULT_SETTINGS.find.rippleSize,
     },
     volume: {
       enabled: settings?.volume?.enabled ?? DEFAULT_SETTINGS.volume.enabled,

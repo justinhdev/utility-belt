@@ -1,6 +1,7 @@
 import { Settings, SettingsPatch, TabSnapshot, VolumeApplyResult, VolumeState } from "./types";
 
 export type RuntimeMessage =
+  | { type: "find:ensure-tab"; tabId: number }
   | { type: "settings:get" }
   | { type: "settings:update"; patch: SettingsPatch }
   | { type: "tabs:list" }
@@ -14,6 +15,7 @@ export type RuntimeMessage =
   | ({ type: "volume:apply-state" } & VolumeState);
 
 export interface RuntimeResponseMap {
+  "find:ensure-tab": { ok: true; injected: boolean };
   "settings:get": Settings;
   "settings:update": Settings;
   "tabs:list": TabSnapshot[];

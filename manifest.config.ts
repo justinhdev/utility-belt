@@ -22,7 +22,8 @@ export default defineManifest({
     {
       matches: ["<all_urls>"],
       js: ["src/content/better-find.ts"],
-      run_at: "document_idle",
+      run_at: "document_start",
+      all_frames: true,
     },
     {
       matches: ["<all_urls>"],
@@ -31,5 +32,6 @@ export default defineManifest({
       all_frames: true,
     },
   ],
+  host_permissions: ["<all_urls>"],
   permissions: ["storage", "tabs", "activeTab", "scripting"],
 });
