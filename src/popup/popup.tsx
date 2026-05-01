@@ -1,20 +1,35 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import { sendMessage } from "../shared/messages";
+import { sendMessage, sendTabMessage } from "../shared/messages";
 import { DEFAULT_SETTINGS, Settings, TabSnapshot } from "../shared/types";
 import "./popup.css";
+
+function normalizeGain(value: unknown): number {
+  const gain = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(gain) ? Math.max(1, Math.min(gain, 4)) : 1;
+}
 
 function Popup() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [tabs, setTabs] = useState<TabSnapshot[]>([]);
   const [activeTab, setActiveTab] = useState<chrome.tabs.Tab | null>(null);
+  const [activeGain, setActiveGain] = useState(1);
   const [status, setStatus] = useState("");
+  const pendingGainCommit = useRef<{ tabId: number; gain: number } | undefined>(undefined);
+  const gainCommitInFlight = useRef(false);
 
   useEffect(() => {
-    void sendMessage({ type: "settings:get" }).then(setSettings);
-    void sendMessage({ type: "tabs:list" }).then(setTabs);
-    void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => setActiveTab(tab ?? null));
+    void sendMessage({ type: "settings:get" })
+      .then(setSettings)
+      .catch(() => setStatus("Could not load settings"));
+    void sendMessage({ type: "tabs:list" })
+      .then(setTabs)
+      .catch(() => setStatus("Could not load tabs"));
+    void chrome.tabs
+      .query({ active: true, lastFocusedWindow: true })
+      .then(([tab]) => setActiveTab(tab ?? null))
+      .catch(() => setStatus("Could not detect active tab"));
   }, []);
 
   const activeHost = useMemo(() => {
@@ -30,41 +45,146 @@ function Popup() {
     }
   }, [activeTab?.url]);
 
-  const activeGain = useMemo(() => {
-    if (activeHost === undefined) {
-      return 1;
+  const displayedGain = normalizeGain(activeGain);
+  const activeTabSnapshot = useMemo(() => tabs.find((tab) => tab.id === activeTab?.id), [activeTab?.id, tabs]);
+  const activeTabMuted = activeTabSnapshot?.muted ?? activeTab?.mutedInfo?.muted ?? false;
+  const mutedTabs = useMemo(() => tabs.filter((tab) => tab.muted).length, [tabs]);
+  const hasMutedTabs = mutedTabs > 0;
+
+  useEffect(() => {
+    if (activeTab?.id === undefined || activeHost === undefined) {
+      setActiveGain(1);
+      return;
     }
 
-    return settings.volume.gainByHost[activeHost] ?? 1;
-  }, [activeHost, settings.volume.gainByHost]);
+    let cancelled = false;
 
-  async function setGain(gain: number) {
+    void sendMessage({ type: "volume:get-tab-gain", tabId: activeTab.id })
+      .then(({ gain }) => {
+        if (!cancelled) {
+          setActiveGain(normalizeGain(gain));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus("Could not load tab volume");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHost, activeTab?.id]);
+
+  function flushGainCommit() {
+    if (gainCommitInFlight.current || pendingGainCommit.current === undefined) {
+      return;
+    }
+
+    const commit = pendingGainCommit.current;
+    pendingGainCommit.current = undefined;
+    gainCommitInFlight.current = true;
+
+    void sendMessage({ type: "volume:set-gain", tabId: commit.tabId, gain: commit.gain })
+      .then((result) => {
+        if (pendingGainCommit.current === undefined) {
+          setStatus(
+            result.applied
+              ? `Volume set to ${Math.round(commit.gain * 100)}%`
+              : "This page cannot be controlled",
+          );
+        }
+      })
+      .catch(() => setStatus("Could not apply volume"))
+      .finally(() => {
+        gainCommitInFlight.current = false;
+        flushGainCommit();
+      });
+  }
+
+  function setGain(gain: number) {
     if (activeTab?.id === undefined) {
       return;
     }
 
-    await sendMessage({ type: "volume:set-gain", tabId: activeTab.id, gain });
-    const next = await sendMessage({ type: "settings:get" });
-    setSettings(next);
-    setStatus(`Volume set to ${Math.round(gain * 100)}%`);
+    const clampedGain = Math.max(1, Math.min(gain, 4));
+    setActiveGain(clampedGain);
+    pendingGainCommit.current = { tabId: activeTab.id, gain: clampedGain };
+    flushGainCommit();
+  }
+
+  async function applyActiveTabVolume() {
+    if (activeTab?.id === undefined || activeHost === undefined) {
+      return;
+    }
+
+    await sendMessage({ type: "volume:apply-tab", tabId: activeTab.id });
   }
 
   async function toggleVolume(enabled: boolean) {
-    const next = await sendMessage({ type: "settings:update", patch: { volume: { enabled } } });
-    setSettings(next);
-    setStatus(enabled ? "Volume booster enabled" : "Volume booster disabled");
+    try {
+      const next = await sendMessage({ type: "settings:update", patch: { volume: { enabled } } });
+      setSettings(next);
+      await applyActiveTabVolume();
+      setStatus(enabled ? "Volume booster enabled" : "Volume booster disabled");
+    } catch {
+      setStatus("Could not update volume booster");
+    }
   }
 
-  async function muteAllTabs() {
-    const result = await sendMessage({ type: "tabs:mute-all" });
-    setTabs(await sendMessage({ type: "tabs:list" }));
-    setStatus(`Muted ${result.muted} tabs`);
+  async function toggleLimiter(limiterEnabled: boolean) {
+    try {
+      const next = await sendMessage({ type: "settings:update", patch: { volume: { limiterEnabled } } });
+      setSettings(next);
+      await applyActiveTabVolume();
+      setStatus(limiterEnabled ? "Limiter enabled" : "Limiter disabled");
+    } catch {
+      setStatus("Could not update limiter");
+    }
   }
 
-  async function closeDuplicates() {
-    const result = await sendMessage({ type: "tabs:close-duplicates" });
-    setTabs(await sendMessage({ type: "tabs:list" }));
-    setStatus(`Closed ${result.closed} duplicate tabs`);
+  async function toggleActiveTabMute() {
+    if (activeTab?.id === undefined) {
+      return;
+    }
+
+    const muted = !activeTabMuted;
+
+    try {
+      await sendMessage({ type: "tabs:set-muted", tabId: activeTab.id, muted });
+      setTabs(await sendMessage({ type: "tabs:list" }));
+      setActiveTab((current) =>
+        current
+          ? {
+              ...current,
+              mutedInfo: {
+                ...(current.mutedInfo ?? {}),
+                muted,
+              },
+            }
+          : current,
+      );
+      setStatus(muted ? "Muted active tab" : "Unmuted active tab");
+    } catch {
+      setStatus(activeTabMuted ? "Could not unmute active tab" : "Could not mute active tab");
+    }
+  }
+
+  async function toggleWindowMute() {
+    try {
+      if (hasMutedTabs) {
+        const result = await sendMessage({ type: "tabs:unmute-all" });
+        setTabs(await sendMessage({ type: "tabs:list" }));
+        setStatus(`Unmuted ${result.unmuted} tabs in this window`);
+        return;
+      }
+
+      const result = await sendMessage({ type: "tabs:mute-all" });
+      setTabs(await sendMessage({ type: "tabs:list" }));
+      setStatus(`Muted ${result.muted} tabs in this window`);
+    } catch {
+      setStatus(hasMutedTabs ? "Could not unmute tabs" : "Could not mute tabs");
+    }
   }
 
   return (
@@ -97,29 +217,42 @@ function Popup() {
             aria-label="Current tab volume"
             disabled={!settings.volume.enabled || activeTab?.id === undefined || activeHost === undefined}
             max="400"
-            min="0"
+            min="100"
             step="5"
             type="range"
-            value={Math.round(activeGain * 100)}
-            onChange={(event) => void setGain(Number(event.currentTarget.value) / 100)}
+            value={Math.round(displayedGain * 100)}
+            onChange={(event) => setGain(normalizeGain(Number(event.currentTarget.value) / 100))}
           />
-          <strong>{Math.round(activeGain * 100)}%</strong>
+          <strong>{Math.round(displayedGain * 100)}%</strong>
+        </div>
+        <div className="sub-setting">
+          <span>Limiter</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={settings.volume.limiterEnabled}
+              onChange={(event) => void toggleLimiter(event.currentTarget.checked)}
+            />
+            <span />
+          </label>
         </div>
       </section>
 
       <section className="section">
         <h2>Tab Utilities</h2>
         <div className="actions">
-          <button onClick={() => void muteAllTabs()}>Mute all tabs</button>
-          <button onClick={() => void closeDuplicates()}>Close duplicates</button>
+          <button disabled={activeTab?.id === undefined} onClick={() => void toggleActiveTabMute()}>
+            {activeTabMuted ? "Unmute tab" : "Mute tab"}
+          </button>
+          <button onClick={() => void toggleWindowMute()}>{hasMutedTabs ? "Unmute window" : "Mute window"}</button>
         </div>
-        <p className="meta">{tabs.length} tabs open</p>
+        <p className="meta">{tabs.length} tabs in this window</p>
       </section>
 
       <section className="section">
         <h2>Better Find</h2>
         <div className="actions">
-          <button onClick={() => activeTab?.id && chrome.tabs.sendMessage(activeTab.id, { type: "find:open" })}>
+          <button onClick={() => activeTab?.id && void sendTabMessage(activeTab.id, { type: "find:open" })}>
             Open find
           </button>
           <button onClick={() => chrome.runtime.openOptionsPage()}>Colors</button>

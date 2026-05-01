@@ -17,6 +17,10 @@ function Options() {
     setSettings(await sendMessage({ type: "settings:update", patch: { find: findPatch } }));
   }
 
+  async function saveVolumePatch(volumePatch: Partial<Settings["volume"]>) {
+    setSettings(await sendMessage({ type: "settings:update", patch: { volume: volumePatch } }));
+  }
+
   async function addDisabledDomain() {
     const normalized = domain.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
@@ -118,15 +122,18 @@ function Options() {
             <input
               checked={settings.volume.enabled}
               type="checkbox"
-              onChange={(event) =>
-                void sendMessage({
-                  type: "settings:update",
-                  patch: { volume: { enabled: event.currentTarget.checked } },
-                }).then(setSettings)
-              }
+              onChange={(event) => void saveVolumePatch({ enabled: event.currentTarget.checked })}
             />
           </label>
         </div>
+        <label className="switch-row">
+          <span>Limiter</span>
+          <input
+            checked={settings.volume.limiterEnabled}
+            type="checkbox"
+            onChange={(event) => void saveVolumePatch({ limiterEnabled: event.currentTarget.checked })}
+          />
+        </label>
       </section>
     </main>
   );

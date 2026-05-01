@@ -74,7 +74,8 @@ h2 {
 
 .section-heading,
 .range-row,
-.actions {
+.actions,
+.sub-setting {
   align-items: center;
   display: flex;
   gap: 10px;
@@ -92,10 +93,16 @@ h2 {
 
 .range-row span,
 .range-row strong,
-.meta {
+.meta,
+.sub-setting span {
   color: #52616b;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.sub-setting {
+  justify-content: space-between;
+  margin-top: 12px;
 }
 
 .actions {

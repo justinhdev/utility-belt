@@ -8,12 +8,20 @@ export interface FindSettings {
 
 export interface VolumeSettings {
   enabled: boolean;
-  gainByHost: Record<string, number>;
+  limiterEnabled: boolean;
 }
 
-export interface TabSettings {
-  reserved?: never;
+export interface VolumeState extends VolumeSettings {
+  gain: number;
 }
+
+export interface VolumeApplyResult {
+  ok: true;
+  controlledElements: number;
+  mediaElements: number;
+}
+
+export type TabSettings = Record<string, never>;
 
 export interface Settings {
   version: 1;
@@ -27,9 +35,9 @@ export interface SettingsPatch {
   find?: Partial<FindSettings>;
   volume?: {
     enabled?: boolean;
-    gainByHost?: Record<string, number>;
+    limiterEnabled?: boolean;
   };
-  tabs?: Partial<TabSettings>;
+  tabs?: TabSettings;
 }
 
 export type StoredSettings = Settings | SettingsPatch;
@@ -45,7 +53,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   volume: {
     enabled: true,
-    gainByHost: {},
+    limiterEnabled: true,
   },
   tabs: {},
 };

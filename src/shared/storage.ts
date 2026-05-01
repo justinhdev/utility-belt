@@ -10,10 +10,7 @@ function mergeSettings(settings?: StoredSettings): Settings {
     },
     volume: {
       enabled: settings?.volume?.enabled ?? DEFAULT_SETTINGS.volume.enabled,
-      gainByHost: {
-        ...DEFAULT_SETTINGS.volume.gainByHost,
-        ...settings?.volume?.gainByHost,
-      },
+      limiterEnabled: settings?.volume?.limiterEnabled ?? DEFAULT_SETTINGS.volume.limiterEnabled,
     },
     tabs: {
       ...DEFAULT_SETTINGS.tabs,
@@ -29,6 +26,7 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(patch: SettingsPatch): Promise<Settings> {
   const current = await getSettings();
+  // Deep-merge the patch into current settings, then normalize against defaults.
   const next = mergeSettings({
     ...current,
     ...patch,
@@ -39,10 +37,6 @@ export async function updateSettings(patch: SettingsPatch): Promise<Settings> {
     volume: {
       ...current.volume,
       ...patch.volume,
-      gainByHost: {
-        ...current.volume.gainByHost,
-        ...patch.volume?.gainByHost,
-      },
     },
     tabs: {
       ...current.tabs,

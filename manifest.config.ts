@@ -29,17 +29,8 @@ export default defineManifest({
       matches: ["<all_urls>"],
       js: ["src/content/volume-booster.ts"],
       run_at: "document_idle",
-      all_frames: false,
+      all_frames: true,
     },
   ],
   permissions: ["storage", "tabs", "activeTab", "scripting"],
-  commands: {
-    "open-find": {
-      suggested_key: {
-        default: "Ctrl+F",
-        mac: "Command+F",
-      },
-      description: "Open enhanced find bar",
-    },
-  },
 });

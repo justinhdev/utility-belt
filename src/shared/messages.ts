@@ -1,25 +1,31 @@
-import { Settings, SettingsPatch, TabSnapshot } from "./types";
+import { Settings, SettingsPatch, TabSnapshot, VolumeApplyResult, VolumeState } from "./types";
 
 export type RuntimeMessage =
   | { type: "settings:get" }
   | { type: "settings:update"; patch: SettingsPatch }
   | { type: "tabs:list" }
+  | { type: "tabs:set-muted"; tabId: number; muted: boolean }
   | { type: "tabs:mute-all" }
-  | { type: "tabs:close-duplicates" }
+  | { type: "tabs:unmute-all" }
   | { type: "volume:get-current-gain" }
+  | { type: "volume:get-tab-gain"; tabId: number }
+  | { type: "volume:apply-tab"; tabId: number }
   | { type: "volume:set-gain"; tabId: number; gain: number }
-  | { type: "volume:apply-gain"; gain: number }
+  | ({ type: "volume:apply-state" } & VolumeState)
   | { type: "find:open" };
 
 export interface RuntimeResponseMap {
   "settings:get": Settings;
   "settings:update": Settings;
   "tabs:list": TabSnapshot[];
+  "tabs:set-muted": { muted: boolean };
   "tabs:mute-all": { muted: number };
-  "tabs:close-duplicates": { closed: number };
-  "volume:get-current-gain": { enabled: boolean; gain: number };
-  "volume:set-gain": { ok: true };
-  "volume:apply-gain": { ok: true };
+  "tabs:unmute-all": { unmuted: number };
+  "volume:get-current-gain": VolumeState;
+  "volume:get-tab-gain": { gain: number };
+  "volume:apply-tab": { ok: true; applied: boolean };
+  "volume:set-gain": { ok: true; applied: boolean };
+  "volume:apply-state": VolumeApplyResult;
   "find:open": { ok: true };
 }
 
@@ -28,16 +34,37 @@ type ResponseFor<T extends RuntimeMessage> = T["type"] extends keyof RuntimeResp
   : never;
 
 export async function sendMessage<T extends RuntimeMessage>(message: T): Promise<ResponseFor<T>> {
-  return chrome.runtime.sendMessage(message);
+  const response = await chrome.runtime.sendMessage(message);
+
+  if (isErrorResponse(response)) {
+    throw new Error(response.error);
+  }
+
+  return response;
 }
 
 export async function sendTabMessage<T extends RuntimeMessage>(
   tabId: number,
   message: T,
 ): Promise<ResponseFor<T>> {
-  return chrome.tabs.sendMessage(tabId, message);
+  const response = await chrome.tabs.sendMessage(tabId, message);
+
+  if (isErrorResponse(response)) {
+    throw new Error(response.error);
+  }
+
+  return response;
 }
 
 export function isRuntimeMessage(message: unknown): message is RuntimeMessage {
   return Boolean(message && typeof message === "object" && "type" in message);
+}
+
+function isErrorResponse(response: unknown): response is { error: string } {
+  return Boolean(
+    response &&
+      typeof response === "object" &&
+      "error" in response &&
+      typeof (response as { error: unknown }).error === "string",
+  );
 }
