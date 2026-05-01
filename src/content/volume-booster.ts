@@ -8,6 +8,7 @@ interface BoostedElement {
 }
 
 const boostedElements = new WeakMap<HTMLMediaElement, BoostedElement>();
+const boostedElementSet = new Set<HTMLMediaElement>();
 let currentGain = 1;
 let enabled = true;
 
@@ -15,9 +16,37 @@ function findMediaElements(): HTMLMediaElement[] {
   return Array.from(document.querySelectorAll("audio, video"));
 }
 
+function getEffectiveGain(): number {
+  return enabled ? currentGain : 1;
+}
+
+function shouldBoost(): boolean {
+  return getEffectiveGain() > 1;
+}
+
+function updateBoostedElements(): void {
+  const effectiveGain = getEffectiveGain();
+
+  for (const element of boostedElementSet) {
+    const boostedElement = boostedElements.get(element);
+
+    if (!element.isConnected || !boostedElement) {
+      boostedElementSet.delete(element);
+      continue;
+    }
+
+    boostedElement.gainNode.gain.value = effectiveGain;
+    void boostedElement.context.resume();
+  }
+}
+
 function boostElement(element: HTMLMediaElement): void {
   if (boostedElements.has(element)) {
-    boostedElements.get(element)!.gainNode.gain.value = enabled ? currentGain : 1;
+    boostedElements.get(element)!.gainNode.gain.value = getEffectiveGain();
+    return;
+  }
+
+  if (!shouldBoost()) {
     return;
   }
 
@@ -28,19 +57,25 @@ function boostElement(element: HTMLMediaElement): void {
 
     source.connect(gainNode);
     gainNode.connect(context.destination);
-    gainNode.gain.value = enabled ? currentGain : 1;
+    gainNode.gain.value = getEffectiveGain();
     boostedElements.set(element, { context, gainNode, source });
+    boostedElementSet.add(element);
 
     element.addEventListener("play", () => {
       void context.resume();
     });
   } catch {
-    // Some sites already attach media elements to an AudioContext. Leave them alone.
+    console.info("Utility Belt could not boost this media element because its audio is already routed.");
   }
 }
 
 function applyGain(gain: number): void {
   currentGain = Math.max(0, Math.min(gain, 4));
+  updateBoostedElements();
+
+  if (!shouldBoost()) {
+    return;
+  }
 
   for (const element of findMediaElements()) {
     boostElement(element);

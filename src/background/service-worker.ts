@@ -101,12 +101,17 @@ async function handleMessage(message: RuntimeMessage, sender: chrome.runtime.Mes
       const host = getHostname(tab.url);
 
       if (host !== undefined) {
+        const nextGainByHost = { ...settings.volume.gainByHost };
+
+        if (message.gain > 1) {
+          nextGainByHost[host] = message.gain;
+        } else {
+          delete nextGainByHost[host];
+        }
+
         await updateSettings({
           volume: {
-            gainByHost: {
-              ...settings.volume.gainByHost,
-              [host]: message.gain,
-            },
+            gainByHost: nextGainByHost,
           },
         });
       }
