@@ -1,12 +1,20 @@
 import { DEFAULT_SETTINGS, Settings, SettingsPatch, StoredSettings } from "./types";
 
+type LegacyFindSettings = Partial<Settings["find"]> & {
+  replaceNativeFind?: boolean;
+};
+
 function mergeSettings(settings?: StoredSettings): Settings {
+  const findSettings = settings?.find as LegacyFindSettings | undefined;
+
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
     find: {
-      ...DEFAULT_SETTINGS.find,
-      ...settings?.find,
+      matchColor: findSettings?.matchColor ?? DEFAULT_SETTINGS.find.matchColor,
+      activeColor: findSettings?.activeColor ?? DEFAULT_SETTINGS.find.activeColor,
+      rippleColor: findSettings?.rippleColor ?? DEFAULT_SETTINGS.find.rippleColor,
+      enabled: findSettings?.enabled ?? findSettings?.replaceNativeFind ?? DEFAULT_SETTINGS.find.enabled,
     },
     volume: {
       enabled: settings?.volume?.enabled ?? DEFAULT_SETTINGS.volume.enabled,

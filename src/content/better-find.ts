@@ -1,5 +1,4 @@
 import { onSettingsChange } from "../shared/storage";
-import { isRuntimeMessage } from "../shared/messages";
 import { DEFAULT_SETTINGS, FindSettings } from "../shared/types";
 
 const BAR_ID = "utility-belt-find";
@@ -26,11 +25,6 @@ function isEditable(target: EventTarget | null): boolean {
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement
   );
-}
-
-function isDisabledForHost(): boolean {
-  const host = window.location.hostname;
-  return settings.disabledDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
 function ensureStyles(): void {
@@ -309,10 +303,6 @@ function moveActive(direction: number): void {
 }
 
 function showBar(prefill = ""): void {
-  if (isDisabledForHost()) {
-    return;
-  }
-
   const findBar = ensureBar();
   findBar.hidden = false;
   input?.focus();
@@ -339,7 +329,7 @@ document.addEventListener(
   (event) => {
     const wantsFind = (event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f";
 
-    if (!wantsFind || !settings.replaceNativeFind || isDisabledForHost()) {
+    if (!wantsFind || !settings.enabled) {
       return;
     }
 
@@ -367,17 +357,3 @@ void chrome.runtime
     ensureStyles();
   })
   .catch(ensureStyles);
-
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!isRuntimeMessage(message)) {
-    return false;
-  }
-
-  if (message.type === "find:open") {
-    showBar();
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  return false;
-});

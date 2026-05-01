@@ -2,8 +2,7 @@ export interface FindSettings {
   matchColor: string;
   activeColor: string;
   rippleColor: string;
-  replaceNativeFind: boolean;
-  disabledDomains: string[];
+  enabled: boolean;
 }
 
 export interface VolumeSettings {
@@ -48,8 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
     matchColor: "#FFEB3B",
     activeColor: "#FF6F00",
     rippleColor: "#FF6F00",
-    replaceNativeFind: true,
-    disabledDomains: [],
+    enabled: true,
   },
   volume: {
     enabled: true,

@@ -14,7 +14,6 @@ export default defineManifest({
     default_popup: "src/popup/index.html",
     default_title: "Utility Belt",
   },
-  options_page: "src/options/index.html",
   background: {
     service_worker: "src/background/service-worker.ts",
     type: "module",

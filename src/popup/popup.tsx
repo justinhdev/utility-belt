@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import { sendMessage, sendTabMessage } from "../shared/messages";
+import { sendMessage } from "../shared/messages";
 import { DEFAULT_SETTINGS, Settings, TabSnapshot } from "../shared/types";
 import "./popup.css";
 
@@ -143,6 +143,15 @@ function Popup() {
     }
   }
 
+  async function saveFindPatch(findPatch: Partial<Settings["find"]>) {
+    try {
+      setSettings(await sendMessage({ type: "settings:update", patch: { find: findPatch } }));
+      setStatus("Better Find settings saved");
+    } catch {
+      setStatus("Could not save Better Find settings");
+    }
+  }
+
   async function toggleActiveTabMute() {
     if (activeTab?.id === undefined) {
       return;
@@ -194,9 +203,6 @@ function Popup() {
           <p className="eyebrow">Utility Belt</p>
           <h1>Quick tools</h1>
         </div>
-        <button className="icon-button" title="Open options" onClick={() => chrome.runtime.openOptionsPage()}>
-          ⚙
-        </button>
       </header>
 
       <section className="section">
@@ -250,12 +256,42 @@ function Popup() {
       </section>
 
       <section className="section">
-        <h2>Better Find</h2>
-        <div className="actions">
-          <button onClick={() => activeTab?.id && void sendTabMessage(activeTab.id, { type: "find:open" })}>
-            Open find
-          </button>
-          <button onClick={() => chrome.runtime.openOptionsPage()}>Colors</button>
+        <div className="section-heading">
+          <h2>Better Find</h2>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={settings.find.enabled}
+              onChange={(event) => void saveFindPatch({ enabled: event.currentTarget.checked })}
+            />
+            <span />
+          </label>
+        </div>
+        <div className="color-row">
+          <label>
+            <span>Match</span>
+            <input
+              type="color"
+              value={settings.find.matchColor}
+              onChange={(event) => void saveFindPatch({ matchColor: event.currentTarget.value })}
+            />
+          </label>
+          <label>
+            <span>Active</span>
+            <input
+              type="color"
+              value={settings.find.activeColor}
+              onChange={(event) => void saveFindPatch({ activeColor: event.currentTarget.value })}
+            />
+          </label>
+          <label>
+            <span>Ripple</span>
+            <input
+              type="color"
+              value={settings.find.rippleColor}
+              onChange={(event) => void saveFindPatch({ rippleColor: event.currentTarget.value })}
+            />
+          </label>
         </div>
       </section>
 

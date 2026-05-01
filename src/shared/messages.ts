@@ -11,8 +11,7 @@ export type RuntimeMessage =
   | { type: "volume:get-tab-gain"; tabId: number }
   | { type: "volume:apply-tab"; tabId: number }
   | { type: "volume:set-gain"; tabId: number; gain: number }
-  | ({ type: "volume:apply-state" } & VolumeState)
-  | { type: "find:open" };
+  | ({ type: "volume:apply-state" } & VolumeState);
 
 export interface RuntimeResponseMap {
   "settings:get": Settings;
@@ -26,7 +25,6 @@ export interface RuntimeResponseMap {
   "volume:apply-tab": { ok: true; applied: boolean };
   "volume:set-gain": { ok: true; applied: boolean };
   "volume:apply-state": VolumeApplyResult;
-  "find:open": { ok: true };
 }
 
 type ResponseFor<T extends RuntimeMessage> = T["type"] extends keyof RuntimeResponseMap
@@ -35,19 +33,6 @@ type ResponseFor<T extends RuntimeMessage> = T["type"] extends keyof RuntimeResp
 
 export async function sendMessage<T extends RuntimeMessage>(message: T): Promise<ResponseFor<T>> {
   const response = await chrome.runtime.sendMessage(message);
-
-  if (isErrorResponse(response)) {
-    throw new Error(response.error);
-  }
-
-  return response;
-}
-
-export async function sendTabMessage<T extends RuntimeMessage>(
-  tabId: number,
-  message: T,
-): Promise<ResponseFor<T>> {
-  const response = await chrome.tabs.sendMessage(tabId, message);
 
   if (isErrorResponse(response)) {
     throw new Error(response.error);
