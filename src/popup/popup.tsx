@@ -17,13 +17,26 @@ function Popup() {
     void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => setActiveTab(tab ?? null));
   }, []);
 
+  const activeHost = useMemo(() => {
+    if (!activeTab?.url) {
+      return undefined;
+    }
+
+    try {
+      const parsedUrl = new URL(activeTab.url);
+      return parsedUrl.protocol.startsWith("http") ? parsedUrl.hostname : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [activeTab?.url]);
+
   const activeGain = useMemo(() => {
-    if (activeTab?.id === undefined) {
+    if (activeHost === undefined) {
       return 1;
     }
 
-    return settings.volume.perTabGain[activeTab.id] ?? 1;
-  }, [activeTab?.id, settings.volume.perTabGain]);
+    return settings.volume.gainByHost[activeHost] ?? 1;
+  }, [activeHost, settings.volume.gainByHost]);
 
   async function setGain(gain: number) {
     if (activeTab?.id === undefined) {
@@ -82,7 +95,7 @@ function Popup() {
           <span>100%</span>
           <input
             aria-label="Current tab volume"
-            disabled={!settings.volume.enabled || activeTab?.id === undefined}
+            disabled={!settings.volume.enabled || activeTab?.id === undefined || activeHost === undefined}
             max="400"
             min="0"
             step="5"

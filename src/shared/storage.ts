@@ -9,11 +9,10 @@ function mergeSettings(settings?: StoredSettings): Settings {
       ...settings?.find,
     },
     volume: {
-      ...DEFAULT_SETTINGS.volume,
-      ...settings?.volume,
-      perTabGain: {
-        ...DEFAULT_SETTINGS.volume.perTabGain,
-        ...settings?.volume?.perTabGain,
+      enabled: settings?.volume?.enabled ?? DEFAULT_SETTINGS.volume.enabled,
+      gainByHost: {
+        ...DEFAULT_SETTINGS.volume.gainByHost,
+        ...settings?.volume?.gainByHost,
       },
     },
     tabs: {
@@ -40,9 +39,9 @@ export async function updateSettings(patch: SettingsPatch): Promise<Settings> {
     volume: {
       ...current.volume,
       ...patch.volume,
-      perTabGain: {
-        ...current.volume.perTabGain,
-        ...patch.volume?.perTabGain,
+      gainByHost: {
+        ...current.volume.gainByHost,
+        ...patch.volume?.gainByHost,
       },
     },
     tabs: {

@@ -8,7 +8,7 @@ export interface FindSettings {
 
 export interface VolumeSettings {
   enabled: boolean;
-  perTabGain: Record<number, number>;
+  gainByHost: Record<string, number>;
 }
 
 export interface TabSettings {
@@ -27,7 +27,7 @@ export interface SettingsPatch {
   find?: Partial<FindSettings>;
   volume?: {
     enabled?: boolean;
-    perTabGain?: Record<number, number>;
+    gainByHost?: Record<string, number>;
   };
   tabs?: Partial<TabSettings>;
 }
@@ -45,7 +45,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   volume: {
     enabled: true,
-    perTabGain: {},
+    gainByHost: {},
   },
   tabs: {},
 };

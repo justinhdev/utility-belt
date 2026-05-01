@@ -54,6 +54,19 @@ async function closeDuplicateTabs(): Promise<{ closed: number }> {
   return { closed: duplicates.length };
 }
 
+function getHostname(url?: string): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol.startsWith("http") ? parsedUrl.hostname : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function applyGainToTab(tabId: number, gain: number): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, { type: "volume:apply-gain", gain });
@@ -76,22 +89,28 @@ async function handleMessage(message: RuntimeMessage, sender: chrome.runtime.Mes
       return closeDuplicateTabs();
     case "volume:get-current-gain": {
       const settings = await getSettings();
-      const tabId = sender.tab?.id;
+      const host = getHostname(sender.tab?.url);
       return {
         enabled: settings.volume.enabled,
-        gain: tabId === undefined ? 1 : settings.volume.perTabGain[tabId] ?? 1,
+        gain: host === undefined ? 1 : settings.volume.gainByHost[host] ?? 1,
       };
     }
     case "volume:set-gain": {
       const settings = await getSettings();
-      await updateSettings({
-        volume: {
-          perTabGain: {
-            ...settings.volume.perTabGain,
-            [message.tabId]: message.gain,
+      const tab = await chrome.tabs.get(message.tabId);
+      const host = getHostname(tab.url);
+
+      if (host !== undefined) {
+        await updateSettings({
+          volume: {
+            gainByHost: {
+              ...settings.volume.gainByHost,
+              [host]: message.gain,
+            },
           },
-        },
-      });
+        });
+      }
+
       await applyGainToTab(message.tabId, message.gain);
       return { ok: true };
     }
